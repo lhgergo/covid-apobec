@@ -1,0 +1,311 @@
+---
+title: "Generating figures for \"C>U mutations generate immunogenic peptides in SARS-CoV-2\"
+  by Balogh et al."
+author: "Gergő Mihály Balogh"
+date: "2025-07-16"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+The following file contains all the codes necessary to generate the figures in the "C>U mutations generate immunogenic peptides in SARS-CoV-2".
+
+# Loading libraries, functions and common objects
+```{r}
+library(magrittr)
+library(purrr)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(immunoinfo.tools) # install it using devtools::install_github("lhgergo/immunoinfo.tools")
+
+thm <- theme_classic() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8), legend.text = element_text(size = 8), 
+        plot.tag = element_text(face = "bold"))
+
+# defining custom functions ----------
+PrettyPvalues <- function(pval, digits = 3, var_name = "P", only_number = FALSE) {
+  if(pval < 1e-03) {
+    pval_str <- pval %>% format(digits = digits, scientific = TRUE)
+    pval_components <- pval_str %>% strsplit("e-") %>% unlist()
+    if(pval_components[1] == "1") pval_components[1] <- "1.0"
+    outval <- paste0('paste(', pval_components[1], ', " x ", 10 ^ -', pval_components[2], ')')
+
+  } else {
+    pval_str <- round(pval, digits = 3) %>% as.character
+    outval <- paste0('paste(', pval_str, ')')
+  }
+  
+  if(!only_number) {
+    outval <- outval %>% gsub("paste\\(", "", .) %>% paste0('paste(italic(', var_name, '), " = ", ', .)
+  }
+
+  return(outval)
+}
+
+PrettyPvalues <- Vectorize(PrettyPvalues, vectorize.args = "pval")
+
+CreateGainlossPlots <- function(cutoff = c(2, 2), pvalpos = 0.5, relative = FALSE, alleles = alleles_unq,
+                                only_gain_and_loss = TRUE, inputdf = NULL, faceting = TRUE, fdr = TRUE,
+                                order_by_median_diffs = TRUE, return_resdf_only = FALSE,
+                                show_progress = TRUE) {
+  if(!is.null(inputdf)) epsdf <- inputdf
+  
+  reslist <- map(alleles, function(crnt_allele) {
+    tmpdf <- epsdf[, c("mutid", "nc", paste0(crnt_allele, "_orig"), paste0(crnt_allele, "_mut"))] %>% set_colnames(c("mutid", "nc", "orig", "mut")) %>%
+      group_by(mutid) %>%
+      summarise(nc = unique(nc),
+                n_gain = sum(orig >= cutoff[1] & mut < cutoff[2]),
+                n_loss = sum(orig < cutoff[2] & mut >= cutoff[1]))
+    
+    if(relative) {
+      tmpdf %>%
+        group_by(nc) %>%
+        summarise(gain = mean(n_gain > n_loss),
+                  no_change = mean(n_gain == n_loss),
+                  loss = mean(n_loss > n_gain))
+    } else {
+      tmpdf %>%
+        group_by(nc) %>%
+        summarise(gain = sum(n_gain > n_loss),
+                  no_change = sum(n_gain == n_loss),
+                  loss = sum(n_loss > n_gain))
+    }
+  }, .progress = show_progress) %>% set_names(alleles_unq)
+  
+  resdf <- imap(reslist, ~cbind.data.frame(.x, allele = .y)) %>% do.call(rbind, .)
+  resdf$greater_gain <- resdf$gain > resdf$loss
+  resdf <- resdf[complete.cases(resdf), ]
+  
+  if(only_gain_and_loss) {
+    resdf <- resdf[, colnames(resdf) != "no_change"]
+    
+    pvalsdf <- resdf %>%
+      group_by(nc) %>% 
+      group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
+      unlist() %>%
+      cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
+  } else {
+    pvalsdf <- resdf %>%
+      group_by(nc) %>% 
+      group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
+      unlist() %>%
+      cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
+  }
+  
+  if(fdr) pvalsdf$pval %<>% p.adjust("fdr")
+  
+  pvalsdf$pval_str <- format(pvalsdf$pval, digits = 3)
+  
+  if(order_by_median_diffs) {
+    diffs_of_medians <- resdf %>% group_by(nc) %>% summarise(diff = median(gain) - median(loss)) %>%
+      SimplifyAggr(using_dplyr = TRUE) %>% sort(decreasing = TRUE)
+    resdf$nc <- factor(resdf$nc, levels = names(diffs_of_medians))
+  } else {
+    resdf$nc <- factor(resdf$nc, levels = resdf$nc %>% unique %>% sort)
+  }
+  
+  if(return_resdf_only) return(resdf)
+  
+  lbldf <- pvalsdf
+  lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
+  lbldf$nc <- factor(lbldf$nc, levels = levels(resdf$nc))
+  
+  resdf_melt <- reshape2::melt(resdf)
+  pltobj <- ggplot(resdf_melt) +
+    geom_boxplot(aes(x = variable, y = value)) +
+    geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 8/.pt) +
+    geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
+    geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
+    scale_colour_brewer(type = "div", palette = "Set1") +
+    thm
+  
+  if(faceting) pltobj <- pltobj + facet_wrap(~nc, nrow = 1)
+  
+  return(pltobj)
+}
+```
+
+
+# Figure 1
+```{r}
+# Figure 1A ----------
+freqsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 1")
+freqsdf$`Nucleotide change` %<>% factor(levels = freqsdf$`Nucleotide change`[order(freqsdf$`Absolute count`, decreasing = TRUE)])
+
+plt_fig1a <- ggplot(freqsdf) +
+  geom_bar(aes(x = `Nucleotide change`, y = `Absolute count`, fill = `Nucleotide change`), stat = "identity") +
+  geom_hline(aes(yintercept = sum(`Absolute count`)*0.1), color = "red", size = 1, linetype = "dashed") +
+  scale_fill_manual(values = freqsdf$`Bar color` %>% set_names(freqsdf$`Nucleotide change`)) +
+  scale_y_continuous(sec.axis = sec_axis(~., name = "Relative frequency",
+                                         breaks = sum(freqsdf$`Absolute count`)*c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3),
+                                         labels = function(x) {paste0(x*100/sum(freqsdf$`Absolute count`), "%")})) +
+  xlab("Nucleotide change") + ylab("Absolute frequency") +
+  thm + theme(legend.position = "none")
+
+# Figure 1B ----------
+frequent_ncs <- freqsdf$`Bar color`[freqsdf$`Relative frequency` > 0.1] %>% set_names(freqsdf$`Nucleotide change`[freqsdf$`Relative frequency` > 0.1])
+freqsdf_quaterly  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 2")
+dunnpdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 3")
+labeldf <- freqsdf_monthly[freqsdf_monthly$`Isolation date` == max(freqsdf_monthly$`Isolation date`, na.rm = TRUE), ]
+
+plt_fig1b <- ggplot(freqsdf_quaterly %>% filter(`Nucleotide change` %in% names(frequent_ncs)),
+                             mapping = aes(x = `Isolation date`, y = `Mean mutation count`, color = `Nucleotide change`, group = `Nucleotide change`)) +
+  geom_line(linetype = "dashed") +
+  geom_point(mapping = aes(x = `Isolation date`, y = `Mean mutation count`, color = `Nucleotide change`, group = `Nucleotide change`)) +
+  geom_errorbar(mapping = aes(ymin = `Mean mutation count` - `Standard deviation of mutation counts`,
+                              ymax = `Mean mutation count` + `Standard deviation of mutation counts`)) +
+  geom_label_repel(data = labeldf, mapping = aes(x = "24 Q3", y = `Mean mutation count`, label = `Nucleotide change`, color = `Nucleotide change`),
+                   direction = "y", seed = 1234, nudge_x = 4, min.segment.length = 0) +
+  scale_color_manual(values = frequent_ncs) +
+  scale_x_discrete(breaks = c(paste0(20:24, " Q1"))) +
+  xlab("Isolation date") + ylab("Mean count") +
+  thm + theme(legend.position = "none") +
+  geom_text(data = dunnpdf, aes(x = `Isolation date`, y = 50, label = marker, fontface = "bold", size = 3))
+
+# Figure 1C ----------
+freqsdf_traj  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 4")
+freqsdf_traj_long <- reshape2::melt(freqsdf_traj, id.vars = colnames(freqsdf_traj)[1:3])
+freqsdf_traj_long$variable %<>% as.character() %>% factor(levels = sort(unique(.)))
+freqsdf_traj_long %<>% filter(variable %in% names(frequent_ncs))
+freqsdf_traj_long$variable %<>% droplevels()
+freqsdf_traj_long$value[is.na(freqsdf_traj_long$value)] <- 0
+freqsdf_traj_long$`Isolation date` %<>% as.Date 
+
+plt_fig1c <- ggplot(freqsdf_traj_long) +
+  geom_line(aes(x = `Isolation date`, y = value, group = `End of trajectory`, color = variable), alpha = 0.1) +
+  facet_wrap(.~variable, nrow = 1) +
+  scale_color_manual(values = frequent_ncs) +
+  scale_x_date(labels = c(paste0(c(20, 22, 24), " Q1")),
+               breaks = c("2020-01-01", "2022-01-01", "2024-01-01") %>% as.Date()) +
+  xlab("Isolation date") + ylab("Mutation count") +
+  thm + theme(legend.position = "none")
+
+# Figure 1D ----------
+gainlossdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 5")
+ncs_unq <- colnames(gainlossdf) %>% extract(grepl("gain", .)) %>% substr(1, 2)
+resdf <- map(ncs_unq, ~gainlossdf[, c(paste0(.x, " gain"), paste0(.x, " loss"), "Allele")] %>%
+               mutate(nc = .x, .before = 1) %>% 
+               set_colnames(c("nc", "gain", "loss", "allele")) %>% 
+               mutate(greater_gain = gain > loss)) %>% do.call(rbind, .)
+
+pvalsdf <- resdf %>%
+  group_by(nc) %>% 
+  group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
+  unlist() %>%
+  cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
+
+pvalsdf$pval %<>% p.adjust("fdr")
+pvalsdf$pval_str <- format(pvalsdf$pval, digits = 3)
+diffs_of_medians <- resdf %>%
+  group_by(nc) %>%
+  summarise(diff = median(gain) - median(loss)) %>%
+  SimplifyAggr(using_dplyr = TRUE) %>%
+  sort(decreasing = TRUE)
+resdf$nc <- factor(resdf$nc, levels = names(diffs_of_medians))
+
+lbldf <- pvalsdf
+lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
+lbldf$nc <- factor(lbldf$nc, levels = levels(resdf$nc))
+
+resdf_melt <- reshape2::melt(resdf)
+pvalpos = 105
+plt_fig1d <- ggplot(resdf_melt) +
+  geom_boxplot(aes(x = variable, y = value)) +
+  geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 8/.pt) +
+  geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
+  geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
+  scale_colour_brewer(type = "div", palette = "Set1") +
+  facet_wrap(~nc, nrow = 1) +
+  xlab(NULL) + ylab("Number of mutations") +
+  thm
+
+# Figure 1E ----------
+# amino acid change frequency plot
+aachfreqsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 7")
+cutoff_th = 0.05
+aachfreqsdf$above_th <- ifelse(aachfreqsdf$`Relative frequency` > cutoff_th, "above", "below")
+aachfreqsdf <- aachfreqsdf[order(aachfreqsdf$`Relative frequency`, decreasing = TRUE), ]
+aachfreqsdf$`Amino acid change` %<>% factor(levels = aachfreqsdf$`Amino acid change`)
+
+plt_fig1e <- ggplot(data = aachfreqsdf) + geom_bar(aes(x = `Amino acid change`, y = `Absolute count`, fill = above_th), stat = "identity") +
+  geom_hline(aes(yintercept = sum(`Absolute count`)*cutoff_th), color = "red", size = 1, linetype = "dashed") +
+  scale_fill_manual(values= c("above" = "#595959", "below" = "#bebebe")) +
+  scale_y_continuous(sec.axis = sec_axis(~., name = NULL,
+                                         breaks = sum(aachfreqsdf$`Absolute count`)*c(0, 0.05, 0.1, 0.15, 0.2, 0.25),
+                                         labels = function(x) {paste0(x*100/sum(aachfreqsdf$`Absolute count`), "%")})) +
+  xlab("Amino acid change") + ylab("Mutation frequency") + thm + theme(legend.position = "none")
+
+
+# Figure 1F ----------
+# amino acid bitscore plot
+aaprefsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 6")
+aaprefsdf$`Amino acid` %<>% factor(levels = aaprefsdf$`Amino acid`[order(aaprefsdf$`Kyte-Doolittle hydrophobicity`)])
+corrvals_vctr <- Hmisc::rcorr(aaprefsdf$`Median bit score`, aaprefsdf$`Kyte-Doolittle hydrophobicity`, type = "spearman") %>%
+  ExtractCorrResults(string_output = FALSE)
+corr_rho <- paste0("ρ = ", round(corrvals_vctr[1], 2))
+corr_pval <- PrettyPvalues(corrvals_vctr[2])
+
+plt_fig1f <- aaprefsdf %>% 
+  ggplot() + 
+  geom_bar(aes(y = `Amino acid`, x = `Median bit score`), stat = "identity") +
+  annotate("text", x = 0.2, y = 5.3, label = corr_rho, hjust = 0, size = 3) +
+  annotate("text", x = 0.2, y = "E", label = corr_pval, hjust = 0, size = 3, parse = "TRUE") +
+  xlab("Median sum bitscores") +
+  ylab("Amino acids") +
+  thm
+
+# Figure 1G ----------
+# amino acid change - hydroph plot
+aachfreqsdf$decreased_hydroph <- aachfreqsdf$`Hydrophobicity change` < 0
+
+plt_fig1g <- ggplot(aachfreqsdf) + geom_bar(aes(x = `Amino acid change`, y = `Hydrophobicity change`, fill = decreased_hydroph), stat = "identity") +
+  geom_hline(yintercept = 0, color = "red", size = 1, linetype = "dashed") +
+  scale_fill_brewer(type = "div", palette = "Set1") +
+  xlab("Amino acid change") + ylab("Δ hydrophobicity") + thm + theme(legend.position = "none")
+
+# Figure 1H ----------
+# amino acid change gainlossplot
+gainlossdf_aach  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 8")
+aachs_unq <- aachfreqsdf$`Amino acid change`[aachfreqsdf$above_th == "above"]
+resdf <- map(aachs_unq, ~gainlossdf_aach[, c(paste0(.x, " gain"), paste0(.x, " loss"), "Allele")] %>%
+               mutate(nc = .x, .before = 1) %>% 
+               set_colnames(c("aach", "gain", "loss", "allele")) %>% 
+               mutate(greater_gain = gain > loss)) %>% do.call(rbind, .)
+
+pvalsdf <- resdf %>%
+  group_by(aach) %>% 
+  group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
+  unlist() %>%
+  cbind.data.frame(pval = ., aach = resdf %>% group_by(aach) %>% group_keys() %>% pull(aach))
+
+pvalsdf$pval %<>% p.adjust("fdr")
+pvalsdf$pval_str <- format(pvalsdf$pval, digits = 3)
+
+lbldf <- pvalsdf
+lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
+lbldf$aach <- factor(lbldf$aach, levels = levels(resdf$aach))
+
+resdf_melt <- reshape2::melt(resdf)
+pvalpos = 55
+plt_fig1h <- ggplot(resdf_melt) +
+  geom_boxplot(aes(x = variable, y = value)) +
+  geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 8/.pt) +
+  geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
+  geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
+  scale_colour_brewer(type = "div", palette = "Set1") +
+  facet_wrap(~aach, nrow = 1) +
+  ylim(c(0, 60)) +
+  xlab(NULL) + ylab("Number of mutations") +
+  thm
+```
+
+# Figure 2
+# Figure 3
+# Figure 4
