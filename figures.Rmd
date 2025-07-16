@@ -17,12 +17,20 @@ The following file contains all the codes necessary to generate the figures in t
 
 # Loading libraries, functions and common objects
 ```{r}
+library(tictoc) # for measuring runtime of the script
+tic()
+
 library(magrittr)
 library(purrr)
 library(dplyr)
 library(ggplot2)
 library(ggrepel)
 library(immunoinfo.tools) # install it using devtools::install_github("lhgergo/immunoinfo.tools")
+library(pROC)
+library(PMCMRplus)
+library(cowplot)
+
+dir.create("plts_ready")
 
 thm <- theme_classic() +
   theme(legend.title = element_blank(), axis.title = element_text(size = 10),
@@ -50,8 +58,60 @@ PrettyPvalues <- function(pval, digits = 3, var_name = "P", only_number = FALSE)
 }
 
 PrettyPvalues <- Vectorize(PrettyPvalues, vectorize.args = "pval")
-```
 
+CreateGainlossPlots <- function(x, facet_row_n = 1, pvalpos = 100, ncs_unq = NULL, order_by_medians = TRUE) {
+  if(is.null(ncs_unq)) ncs_unq <- colnames(x) %>% extract(grepl("gain", .)) %>% strsplit(" ") %>% map_chr(~.x[1])
+  
+  resdf <- map(ncs_unq, ~x[, c(paste0(.x, " gain"), paste0(.x, " loss"), "Allele")] %>%
+                 mutate(nc = .x, .before = 1) %>% 
+                 set_colnames(c("nc", "gain", "loss", "allele")) %>% 
+                 mutate(greater_gain = gain > loss)) %>% do.call(rbind, .)
+  
+  pvalsdf <- resdf %>%
+    group_by(nc) %>% 
+    group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
+    unlist() %>%
+    cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
+  
+  pvalsdf$pval %<>% p.adjust("fdr")
+  pvalsdf$pval_str <- format(pvalsdf$pval, digits = 3)
+  
+  if(order_by_medians) {
+    diffs_of_medians <- resdf %>%
+      group_by(nc) %>%
+      summarise(diff = median(gain) - median(loss)) %>%
+      SimplifyAggr(using_dplyr = TRUE) %>%
+      sort(decreasing = TRUE)
+    resdf$nc <- factor(resdf$nc, levels = names(diffs_of_medians))
+  } else {
+    resdf$nc <- factor(resdf$nc, levels = ncs_unq)
+  }
+
+  lbldf <- pvalsdf
+  lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
+  lbldf$nc <- factor(lbldf$nc, levels = levels(resdf$nc))
+  
+  resdf_melt <- reshape2::melt(resdf)
+  plt <- ggplot(resdf_melt) +
+    geom_boxplot(aes(x = variable, y = value)) +
+    geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 8/.pt) +
+    geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
+    geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
+    scale_colour_brewer(type = "div", palette = "Set1") +
+    facet_wrap(~nc, nrow = facet_row_n) +
+    xlab(NULL) + ylab("Number of mutations") +
+    thm
+  
+  return(plt)
+}
+
+CreateBreaks2 <- function(minval, maxval, n = 10) {
+  abs_maxval <- c(minval, maxval) %>% abs() %>% max()
+  
+  c(seq(-abs_maxval, 0, length.out=ceiling(n/2) + 1), 
+    seq(abs_maxval/n, abs_maxval, length.out=floor(n/2)))
+}
+```
 
 # Figure 1
 ```{r}
@@ -73,7 +133,7 @@ plt_fig1a <- ggplot(freqsdf) +
 frequent_ncs <- freqsdf$`Bar color`[freqsdf$`Relative frequency` > 0.1] %>% set_names(freqsdf$`Nucleotide change`[freqsdf$`Relative frequency` > 0.1])
 freqsdf_quaterly  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 2")
 dunnpdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 3")
-labeldf <- freqsdf_monthly[freqsdf_monthly$`Isolation date` == max(freqsdf_monthly$`Isolation date`, na.rm = TRUE), ]
+labeldf <- freqsdf_quaterly[freqsdf_quaterly$`Isolation date` == max(freqsdf_quaterly$`Isolation date`, na.rm = TRUE), ]
 
 plt_fig1b <- ggplot(freqsdf_quaterly %>% filter(`Nucleotide change` %in% names(frequent_ncs)),
                              mapping = aes(x = `Isolation date`, y = `Mean mutation count`, color = `Nucleotide change`, group = `Nucleotide change`)) +
@@ -220,12 +280,386 @@ plt_fig1h <- ggplot(resdf_melt) +
   ylim(c(0, 60)) +
   xlab(NULL) + ylab("Number of mutations") +
   thm
+
+# assembling Figure 1 ----------
+row1 <- plot_grid(plt_fig1a, plt_fig1b, labels = c("A", "B"))
+row2 <- plot_grid(plt_fig1c, labels = "C")
+row3 <- plot_grid(plt_fig1d, labels = "D")
+row4 <- plot_grid(plt_fig1e,
+                  plt_fig1f + thm + theme(axis.text.y = element_text(size = 7)),
+                  plt_fig1g, labels = c("E", "F", "G"), nrow = 1, rel_widths = c(0.4, 0.25, 0.35))
+row5 <- plot_grid(plt_fig1h, labels = "H")
+plt_fig1 <- plot_grid(row1, row2, row3, row4, row5, ncol = 1)
+
+png(filename = "plts_ready/figure_1.png", width = 18.46, height = 26.14, units = "cm", res = 300)
+plt_fig1
+dev.off()
 ```
 
 # Figure 2
 ```{r}
+# Figure 2A ----------
+genotypesdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_2.xlsx", sheet = "Supplementary Data Table 9")
+genotypesdf %<>% 
+  dplyr::select("Subject ID",
+                "Binding gain for all loci",
+                "Binding gain for HLA-A",
+                "Binding gain for HLA-B",
+                "Binding gain for HLA-C") %>% 
+  set_colnames(c("id", "all", "A", "B", "C"))
 
+genotypesdf_long <- genotypesdf %>% reshape2::melt()
+colnames(genotypesdf_long)[2] <- "locus"
+
+plt_fig2a <- ggplot(genotypesdf_long) +
+  geom_histogram(aes(x = value), color = "black", fill = "grey", bins = 60) +
+  facet_wrap(locus~., nrow = 2) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", size = 1) +
+  xlab("Mean genotype level binding gain") + ylab("Subject count") +
+  thm +
+  theme(plot.tag = element_text(face = "bold")) +
+  labs(tag = "A")
+
+# Figure 2B ----------
+freqsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 1")
+frequent_ncs <- freqsdf$`Bar color`[freqsdf$`Relative frequency` > 0.1] %>% set_names(freqsdf$`Nucleotide change`[freqsdf$`Relative frequency` > 0.1])
+gainsdf_traj  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_2.xlsx", sheet = "Supplementary Data Table 10")
+gainsdf_traj_long <- reshape2::melt(gainsdf_traj, id.vars = colnames(gainsdf_traj)[1:3])
+gainsdf_traj_long$variable %<>% as.character() %>% factor(levels = sort(unique(.)))
+gainsdf_traj_long$value[is.na(gainsdf_traj_long$value)] <- 0
+gainsdf_traj_long$`Isolation date` %<>% as.Date 
+
+plt_fig2b <- ggplot(gainsdf_traj_long[gainsdf_traj_long$variable == "All mutations", ]) +
+  geom_line(aes(x = `Isolation date`, y = value, group = `End of trajectory`, color = variable), alpha = 0.2, show.legend = FALSE) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1) +
+  facet_wrap(~variable) +
+  xlab("Isolation date") + ylab("Mean genotype level binding gain") +
+  scale_x_date(labels = c(paste0(20:24, " Q1")),
+               breaks = c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01", "2024-01-01") %>% as.Date()) +
+  scale_color_manual(values = c(frequent_ncs, `all mutations` = "#000000")) +
+  thm
+
+# Figure 2C ----------
+plt_fig2c <- gainsdf_traj_long %>% 
+  filter(variable != "All mutations") %>% 
+  mutate(variable = factor(variable, levels = c("CU", "AG", "UC", "GU", "GA"))) %>% 
+  ggplot() +
+  geom_line(aes(x = `Isolation date`, y = value, group = `End of trajectory`, color = variable), alpha = 0.2, show.legend = FALSE) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1) +
+  facet_wrap(~variable, nrow = 1) +
+  xlab(NULL) + ylab("Mean genotype level binding gain") +
+  scale_x_date(labels = c(paste0(c(20, 22, 24), " Q1")),
+               breaks = c("2020-01-01", "2022-01-01", "2024-01-01") %>% as.Date()) +
+  scale_color_manual(values = c(frequent_ncs, `all mutations` = "#000000")) +
+  thm + theme(legend.position = "none") +
+  xlab("Isolation date")
+
+# Figure 2D ----------
+modeldf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_2.xlsx", sheet = "Supplementary Data Table 11")
+modeldf_toplot <- modeldf %>% 
+  filter(Effect == "fixed") %>% 
+  filter(Term != "(Intercept)") %>% 
+  mutate(pval_pretty = PrettyPvalues(`P value`)) %>% 
+  arrange(by = Estimate) %>% 
+  mutate(pos_y = (1:length(Region)) + 1.3) %>% 
+  mutate(`P < 0.05` = ifelse(`P value` < 0.05, "Significant", "Non-significant")) %>% 
+  add_row(Estimate = 0, `P < 0.05` = "Non-significant", Region = "Africa", pval_pretty = "Reference", pos_y = 1, .before = 1)
+
+regions_ordered <- modeldf_toplot$Region[-1][order(modeldf_toplot$Estimate[-1])]
+
+plt_fig2d <- ggplot(modeldf_toplot) +
+  geom_vline(xintercept = 0, color = "#cecece", linetype = "dashed", linewidth = 1) +
+  geom_segment(aes(x = `95% CI - low`, xend = `95% CI - high`, y = Region, color = `P < 0.05`), size = 0.5) +
+  geom_point(aes(x = Estimate, y = Region, color = `P < 0.05`), shape = 18, size = 4) +
+  geom_text(aes(x = 0.005, y = pos_y, hjust = 0, label = pval_pretty), parse = T, size = 3) +
+  scale_y_discrete(limits = c("Africa", regions_ordered)) +
+  scale_color_manual(values = c("Significant" = "#e41a1c",
+                                "Non-significant" = "#377eb8")) +
+  xlab("Coefficient estimate") +
+  theme_classic() +
+  thm +
+  theme(legend.position = "none", legend.title = element_blank()) +
+  theme(plot.tag = element_text(face = "bold"))
+
+# Figure 2E ----------
+bgainreddf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_2.xlsx", sheet = "Supplementary Data Table 12")
+plt_fig2e <- ggplot(bgainreddf) +
+  geom_tile(aes(x = `Allele removed`, y = Country, fill = `Binding gain change after the elimination of the allele`)) +
+  scale_fill_gradient2(low = "#3C5488B2", mid = "white", high = "#DC0000B2", midpoint = 0) +
+  xlab("Allele") + ylab("Country") +
+  theme_classic() +
+  thm +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(1, 'cm'), legend.key.height = unit(0.3, 'cm'), legend.title = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+# assembling Figure 2 ----------
+row1 <- plot_grid(plt_fig2a + labs(tag = "A"), plt_fig2b + labs(tag = "B"))
+row2 <- plot_grid(plt_fig2c + labs(tag = "C"))
+row3 <- plot_grid(plt_fig2d + labs(tag = "D") + guides(fill=guide_legend(nrow=2,byrow=TRUE)),
+                  plt_fig2e + labs(tag = "E"), rel_widths = c(0.5, 0.5))
+
+plt_fig2 <- plot_grid(row1, row2, row3, ncol = 1)
+
+png(filename = "plts_ready/figure_2.png", height = 24.14, width = 18.46, res = 300, units = "cm")
+plt_fig2
+dev.off()
 ```
 
 # Figure 3
-# Figure 4
+```{r}
+# Figure 3A ----------
+bindingdf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_3.xlsx", sheet = "Supplementary Data Table 13")
+
+rocobj <- pROC::roc(response = bindingdf$`REVEAL binding`, predictor = bindingdf$`Predicted binding affinity (nM)`)
+
+plt_fig3a <- ggroc(rocobj) +
+  annotate(geom = "text", x = 0.25, y = 0.25,
+           label = paste0("AUC: ",auc(rocobj) %>% round(digits = 2)),
+           hjust = 1, size = 4.2) +
+  geom_abline(intercept = 1, slope = 1) +
+  theme_classic() + xlab("Specificity") + ylab("Sensitivity")
+
+# Figure 3B ----------
+tcelldf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_3.xlsx", sheet = "Supplementary Data Table 14")
+tcelldf_long <- tcelldf %>% 
+  dplyr::select(`Subject ID`, `CD25+ fraction - unstimulated`, `CD25+ fraction - peptide pool 1`, `CD25+ fraction - peptide pool 2`) %>% 
+  set_colnames(c("id", "Unstimulated", "Original", "Mutated")) %>% 
+  reshape2::melt()
+
+pval_friedman <- tcelldf_long %>% rstatix::friedman_test(value ~ variable | id) %>% pull("p") # no post-hoc testing
+pvals_friedman_conover <- PMCMRplus::frdAllPairsConoverTest(y = tcelldf_long$value,
+                                                           groups = tcelldf_long$variable,
+                                                           blocks = tcelldf_long$id) # with post-hoc testing
+
+pval_fc_unstim_orig <- pvals_friedman_conover$p.value[1, 1]
+pval_fc_orig_mut <- pvals_friedman_conover$p.value[2, 2]
+
+plt_fig3b <- ggplot(tcelldf_long) +
+  geom_boxplot(aes(x = variable, y = value)) +
+  geom_line(aes(x = variable, y = value, group = id), size = 0.25, show.legend = FALSE, alpha = 0.5) +
+  geom_point(aes(x = variable, y = value), show.legend = FALSE, alpha = 0.5) +
+  scale_colour_brewer(type = "div", palette = "Set1") +
+  annotate("text", x = 1.5, y = tcelldf$`CD25+ fraction - peptide pool 1` %>% max %>% add(1),
+           label = PrettyPvalues(pval_fc_unstim_orig),
+           hjust = 0.5, parse = TRUE) +
+  annotate("text", x = 2.5, y = tcelldf$`CD25+ fraction - peptide pool 2` %>% max %>% add(1.1),
+           label = PrettyPvalues(pval_fc_orig_mut),
+           hjust = 0.5, parse = TRUE) +
+  geom_segment(x = 1, xend = 2, y = tcelldf$`CD25+ fraction - peptide pool 1` %>% max %>% add(0.6)) +
+  geom_segment(x = 2, xend = 3, y = tcelldf$`CD25+ fraction - peptide pool 2` %>% max %>% add(0.6)) +
+  xlab("Stimulating peptide pool") + ylab("Fraction of CD25+ cells (%)") +
+  thm
+
+# assembling Figure 3 -----------
+figure_3 <- plot_grid(plt_fig3a, plt_fig3b, nrow = 1, labels = c("A", "B"))
+png(filename = "plts_ready/figure_3.png", width = 13, height = 7, units = "cm", res = 300)
+figure_3
+dev.off()
+
+```
+
+# Supplementary Figure 1
+```{r}
+# Supplementary Figure 1A ----------
+bloomdf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_4.xlsx", sheet = "Supplementary Data Table 15")
+
+ncs_unq_ordered_actcounts <- bloomdf %>% 
+  group_by(Substitution) %>% 
+  summarise(median(`Mutation count`)) %>% 
+  SimplifyAggr(using_dplyr = T) %>% 
+  sort(decreasing = TRUE) %>% 
+  names()
+
+plt_supplfig1a <- ggplot(bloomdf) +
+  geom_boxplot(aes(x = Substitution, y = `Mutation count`)) +
+  xlim(ncs_unq_ordered_actcounts) +
+  scale_y_log10() +
+  xlab("Nucleotide change") +
+  ylab("Mutation counts on the phylogenetic tree") +
+  thm
+
+# Supplementary Figure 1B ----------
+gainlossdf_bloom <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_4.xlsx", sheet = "Supplementary Data Table 16")
+plt_supplfig1b <- CreateGainlossPlots(gainlossdf_bloom, facet_row_n = 1, pvalpos = 0.06)
+
+# assembling Supplementary Figure 1 -----------
+row1 <- cowplot::plot_grid(plt_supplfig1a, labels = c("A"))
+row2 <- cowplot::plot_grid(plt_supplfig1b, labels = c("B"))
+supplfig_1 <- cowplot::plot_grid(row1, row2, ncol = 1)
+
+png(filename = "plts_ready/supplfig_1.png", width = 18.46, height = 20, units = "cm", res = 300)
+supplfig_1
+dev.off()
+```
+
+# Supplementary Figure 2
+```{r}
+# Supplementary Figure 2A ----------
+gainlossdf_iedb <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_5.xlsx", sheet = "Supplementary Data Table 17")
+plt_supplfig2a <- CreateGainlossPlots(gainlossdf_iedb, facet_row_n = 1, pvalpos = 70) +
+  xlab("") + ylab("Number of mutations")
+
+# Supplementary Figure 2B ----------
+gainlossdf_rubella <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_5.xlsx", sheet = "Supplementary Data Table 18")
+plt_supplfig2b <- CreateGainlossPlots(gainlossdf_rubella, facet_row_n = 1, pvalpos = 10) +
+  xlab("") + ylab("Number of mutations")
+
+# assembling Supplementary Figure 2 -----------
+plt_supplfig_2 <- cowplot::plot_grid(plt_supplfig2a, plt_supplfig2b,ncol = 1, labels = c("A", "B"))
+
+png(filename = "plts_ready/supplfig_2.png", width = 18.46, height = 20, units = "cm", res = 300)
+plt_supplfig_2
+dev.off()
+```
+
+# Supplementary Figure 3
+```{r}
+gainlossdfs_context <- list(upstream_A = readxl::read_excel("supplementary_data_tables/Supplementary_Data_6.xlsx",
+                                                            sheet = "Supplementary Data Table 19"),
+                            upstream_C = readxl::read_excel("supplementary_data_tables/Supplementary_Data_6.xlsx",
+                                                            sheet = "Supplementary Data Table 20"),
+                            upstream_G = readxl::read_excel("supplementary_data_tables/Supplementary_Data_6.xlsx",
+                                                            sheet = "Supplementary Data Table 21"),
+                            upstream_U = readxl::read_excel("supplementary_data_tables/Supplementary_Data_6.xlsx",
+                                                            sheet = "Supplementary Data Table 22"))
+
+gainlossdfs_context <- map(gainlossdfs_context, ~.x %>% dplyr::relocate(c(10, 11), .after = 1))
+
+gainlossdfs_context_all <- cbind(gainlossdfs_context$upstream_A,
+                                 gainlossdfs_context$upstream_C[, -1],
+                                 gainlossdfs_context$upstream_G[, -1],
+                                 gainlossdfs_context$upstream_U[, -1])
+
+plt_supplfig3 <- CreateGainlossPlots(gainlossdfs_context_all,
+                    facet_row_n = 4,
+                    pvalpos = 50,
+                    ncs_unq = colnames(gainlossdfs_context_all) %>% extract(grepl("gain", .)) %>% gsub(" gain", "", .),
+                    order_by_medians = F)
+
+# exporting Supplementary Figure 3 -----------
+png(filename = "plts_ready/supplfig_3.png", width = 18.46, height = 20.1, units = "cm", res = 300)
+plt_supplfig3
+dev.off()
+```
+
+# Supplementary Figure 4
+```{r}
+netgainsdf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_7.xlsx", sheet = "Supplementary Data Table 23")
+netgainmtx <- netgainsdf[, -1] %>% set_rownames(netgainsdf$Allele) %>% as.matrix
+netgainmtx <- netgainmtx[, as.character(aachfreqsdf$`Amino acid change`)]
+
+absmax <- netgainmtx %>% abs %>% max
+plt_supplfig4 <- netgainmtx %>%
+  pheatmap::pheatmap(breaks = CreateBreaks2(-absmax, absmax, n = 100), cluster_rows = FALSE, cluster_cols = FALSE,
+                     color = colorRampPalette(c("#3C5488B2", "white", "#DC0000B2"))(100))
+
+# exporting Supplementary Figure 3 -----------
+png(filename = "plts_ready/supplfig_4.png", width = 18.46, height = 20, units = "cm", res = 300)
+plt_supplfig4
+dev.off()
+```
+
+# Supplementary Figure 5
+```{r}
+# Supplementary Figure 5A ----------
+aachfreqsdf_GU <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_8.xlsx", sheet = "Supplementary Data Table 24")
+
+cutoff_th = 0.05
+aachfreqsdf_GU$above_th <- ifelse(aachfreqsdf_GU$`Relative frequency` > cutoff_th, "above", "below")
+aachfreqsdf_GU <- aachfreqsdf_GU[order(aachfreqsdf_GU$`Relative frequency`, decreasing = TRUE), ]
+aachfreqsdf_GU$`Amino acid change` %<>% factor(levels = aachfreqsdf_GU$`Amino acid change`)
+
+plt_supplfig5a <- ggplot(data = aachfreqsdf_GU) + geom_bar(aes(x = `Amino acid change`, y = `Absolute count`, fill = above_th), stat = "identity") +
+  geom_hline(aes(yintercept = sum(`Absolute count`)*cutoff_th), color = "red", size = 1, linetype = "dashed") +
+  scale_fill_manual(values= c("above" = "#595959", "below" = "#bebebe")) +
+  scale_y_continuous(sec.axis = sec_axis(~., name = NULL,
+                                         breaks = sum(aachfreqsdf_GU$`Absolute count`)*c(0, 0.05, 0.1, 0.15, 0.2, 0.25),
+                                         labels = function(x) {paste0(x*100/sum(aachfreqsdf_GU$`Absolute count`), "%")})) +
+  xlab("Amino acid change") + ylab("Mutation frequency") + thm + theme(legend.position = "none")
+
+# Supplementary Figure 5B ----------
+hydrophchdf_GU <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_8.xlsx", sheet = "Supplementary Data Table 25")
+hydrophchdf_GU$`Amino acid change` %<>% factor(levels = hydrophchdf_GU$`Amino acid change`)
+hydrophchdf_GU$decreased_hydroph <- hydrophchdf_GU$`Hydrophobicity change` < 0
+
+plt_supplfig5b <- ggplot(hydrophchdf_GU) + geom_bar(aes(x = `Amino acid change`, y = `Hydrophobicity change`, fill = decreased_hydroph), stat = "identity") +
+  geom_hline(yintercept = 0, color = "red", size = 1, linetype = "dashed") +
+  scale_fill_brewer(type = "div", palette = "Set1") +
+  xlab("Amino acid change") + ylab("Δ hydrophobicity") + thm + theme(legend.position = "none")
+
+# Supplementary Figure 5C ----------
+gainlossdf_GU <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_8.xlsx", sheet = "Supplementary Data Table 26")
+plt_supplfig5c <- CreateGainlossPlots(gainlossdf_GU, pvalpos = 42, 
+                    ncs_unq = colnames(gainlossdf_GU) %>% extract(grepl("gain", .)) %>% gsub(" gain", "", .)) + ylim(c(0, 45))
+
+# exporting Supplementary Figure 5 -----------
+png(filename = "plts_ready/supplfig_5.png",
+    width = 20, height = 16, units = "cm", res = 300)
+cowplot::plot_grid(cowplot::plot_grid(plt_supplfig5a, plt_supplfig5b, nrow = 1,
+                                      labels = c("A", "B"), rel_widths = c(0.6, 0.4)), 
+                   plt_supplfig5c, ncol = 1, labels = c(NA, "C"))
+dev.off()
+```
+
+# Supplementary Figure 6
+```{r}
+bgainsdf_alleles <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_9.xlsx", sheet = "Supplementary Data Table 27")
+bgainsdf_alleles %<>%
+  arrange(by = `Mean binding gains`) %>%
+  mutate(Allele = factor(Allele, levels = Allele))
+
+clrs <- c(loss = "#377eb8", gain = "#e41a1c", `no change` = "#bebebe")
+plt_supplfig6 <- ggplot(bgainsdf_alleles) + 
+  geom_bar(aes(x = Allele, y = `Mean binding gains`, fill = `Gain or loss`),
+           stat = "identity") +
+  scale_fill_manual(values = clrs) +
+  xlab("Allele") + ylab("Mean bound peptide gain") +
+  thm + theme(axis.text.x = element_text(angle = 90, vjust = 0.5), legend.position = "none")
+
+# exporting Supplementary Figure 6 -----------
+png(filename = "plts_ready/supplfig_6.png", width = 18.46, height = 10, units = "cm", res = 300)
+plt_supplfig6
+dev.off()
+```
+
+# Supplementary Figure 8
+```{r}
+bgainsdf_invitro_subj <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_10.xlsx", sheet = "Supplementary Data Table 28")
+
+plt_supplfig8 <- ggplot(bgainsdf_invitro_subj) +
+  geom_histogram(aes(x = `Peptide binding gain`), color = "black", fill = "grey", bins = 10) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", size = 1) +
+  xlab("Peptide binding gain") + ylab("Number of subjects") + thm +
+  coord_cartesian(ylim = c(0, 25))
+
+png(filename = "plts_ready/supplfig_8.png", width = 12, height = 12, units = "cm", res = 300)
+plt_supplfig8
+dev.off()
+```
+
+# Supplementary Figure 10
+```{r}
+fitnessdf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_11.xlsx", sheet = "Supplementary Data Table 29")
+
+pltslist <- list(ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (all loci)`, y = `Fitness change`)) + xlab("Net binding gain (all loci)"),
+                     ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (A)`, y = `Fitness change`)) + xlab("Net binding gain (A)"),
+                     ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (B)`, y = `Fitness change`)) + xlab("Net binding gain (B)"),
+                     ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (A and B)`, y = `Fitness change`)) + xlab("Net binding gain (A and B)"),
+                     ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (C)`, y = `Fitness change`)) + xlab("Net binding gain (C)"),
+                     ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (A0201)`, y = `Fitness change`)) + xlab("Net binding gain (A0201)")) %>%
+  map(~.x + ylab("Fitness change") + theme_classic())
+
+plt_supplfig10 <- pltslist %>% cowplot::plot_grid(plotlist = ., ncol = 2, labels = c("A", "B", "C", "D", "E", "F"))
+
+png(filename = "plts_ready/supplfig_10.png",
+    width = 16, height = 20, units = "cm", res = 300)
+plt_supplfig10
+dev.off()
+```
+
+```{r}
+toc()
+```
+
