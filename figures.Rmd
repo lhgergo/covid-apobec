@@ -50,86 +50,6 @@ PrettyPvalues <- function(pval, digits = 3, var_name = "P", only_number = FALSE)
 }
 
 PrettyPvalues <- Vectorize(PrettyPvalues, vectorize.args = "pval")
-
-CreateGainlossPlots <- function(cutoff = c(2, 2), pvalpos = 0.5, relative = FALSE, alleles = alleles_unq,
-                                only_gain_and_loss = TRUE, inputdf = NULL, faceting = TRUE, fdr = TRUE,
-                                order_by_median_diffs = TRUE, return_resdf_only = FALSE,
-                                show_progress = TRUE) {
-  if(!is.null(inputdf)) epsdf <- inputdf
-  
-  reslist <- map(alleles, function(crnt_allele) {
-    tmpdf <- epsdf[, c("mutid", "nc", paste0(crnt_allele, "_orig"), paste0(crnt_allele, "_mut"))] %>% set_colnames(c("mutid", "nc", "orig", "mut")) %>%
-      group_by(mutid) %>%
-      summarise(nc = unique(nc),
-                n_gain = sum(orig >= cutoff[1] & mut < cutoff[2]),
-                n_loss = sum(orig < cutoff[2] & mut >= cutoff[1]))
-    
-    if(relative) {
-      tmpdf %>%
-        group_by(nc) %>%
-        summarise(gain = mean(n_gain > n_loss),
-                  no_change = mean(n_gain == n_loss),
-                  loss = mean(n_loss > n_gain))
-    } else {
-      tmpdf %>%
-        group_by(nc) %>%
-        summarise(gain = sum(n_gain > n_loss),
-                  no_change = sum(n_gain == n_loss),
-                  loss = sum(n_loss > n_gain))
-    }
-  }, .progress = show_progress) %>% set_names(alleles_unq)
-  
-  resdf <- imap(reslist, ~cbind.data.frame(.x, allele = .y)) %>% do.call(rbind, .)
-  resdf$greater_gain <- resdf$gain > resdf$loss
-  resdf <- resdf[complete.cases(resdf), ]
-  
-  if(only_gain_and_loss) {
-    resdf <- resdf[, colnames(resdf) != "no_change"]
-    
-    pvalsdf <- resdf %>%
-      group_by(nc) %>% 
-      group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
-      unlist() %>%
-      cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
-  } else {
-    pvalsdf <- resdf %>%
-      group_by(nc) %>% 
-      group_map(~wilcox.test(.x$gain, .x$loss, paired = TRUE)$p.value) %>% 
-      unlist() %>%
-      cbind.data.frame(pval = ., nc = resdf %>% group_by(nc) %>% group_keys() %>% pull(nc))
-  }
-  
-  if(fdr) pvalsdf$pval %<>% p.adjust("fdr")
-  
-  pvalsdf$pval_str <- format(pvalsdf$pval, digits = 3)
-  
-  if(order_by_median_diffs) {
-    diffs_of_medians <- resdf %>% group_by(nc) %>% summarise(diff = median(gain) - median(loss)) %>%
-      SimplifyAggr(using_dplyr = TRUE) %>% sort(decreasing = TRUE)
-    resdf$nc <- factor(resdf$nc, levels = names(diffs_of_medians))
-  } else {
-    resdf$nc <- factor(resdf$nc, levels = resdf$nc %>% unique %>% sort)
-  }
-  
-  if(return_resdf_only) return(resdf)
-  
-  lbldf <- pvalsdf
-  lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
-  lbldf$nc <- factor(lbldf$nc, levels = levels(resdf$nc))
-  
-  resdf_melt <- reshape2::melt(resdf)
-  pltobj <- ggplot(resdf_melt) +
-    geom_boxplot(aes(x = variable, y = value)) +
-    geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 8/.pt) +
-    geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
-    geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
-    scale_colour_brewer(type = "div", palette = "Set1") +
-    thm
-  
-  if(faceting) pltobj <- pltobj + facet_wrap(~nc, nrow = 1)
-  
-  return(pltobj)
-}
 ```
 
 
@@ -227,7 +147,6 @@ plt_fig1d <- ggplot(resdf_melt) +
   thm
 
 # Figure 1E ----------
-# amino acid change frequency plot
 aachfreqsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 7")
 cutoff_th = 0.05
 aachfreqsdf$above_th <- ifelse(aachfreqsdf$`Relative frequency` > cutoff_th, "above", "below")
@@ -244,7 +163,6 @@ plt_fig1e <- ggplot(data = aachfreqsdf) + geom_bar(aes(x = `Amino acid change`, 
 
 
 # Figure 1F ----------
-# amino acid bitscore plot
 aaprefsdf  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 6")
 aaprefsdf$`Amino acid` %<>% factor(levels = aaprefsdf$`Amino acid`[order(aaprefsdf$`Kyte-Doolittle hydrophobicity`)])
 corrvals_vctr <- Hmisc::rcorr(aaprefsdf$`Median bit score`, aaprefsdf$`Kyte-Doolittle hydrophobicity`, type = "spearman") %>%
@@ -262,7 +180,6 @@ plt_fig1f <- aaprefsdf %>%
   thm
 
 # Figure 1G ----------
-# amino acid change - hydroph plot
 aachfreqsdf$decreased_hydroph <- aachfreqsdf$`Hydrophobicity change` < 0
 
 plt_fig1g <- ggplot(aachfreqsdf) + geom_bar(aes(x = `Amino acid change`, y = `Hydrophobicity change`, fill = decreased_hydroph), stat = "identity") +
@@ -271,7 +188,6 @@ plt_fig1g <- ggplot(aachfreqsdf) + geom_bar(aes(x = `Amino acid change`, y = `Hy
   xlab("Amino acid change") + ylab("Δ hydrophobicity") + thm + theme(legend.position = "none")
 
 # Figure 1H ----------
-# amino acid change gainlossplot
 gainlossdf_aach  <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_1.xlsx", sheet = "Supplementary Data Table 8")
 aachs_unq <- aachfreqsdf$`Amino acid change`[aachfreqsdf$above_th == "above"]
 resdf <- map(aachs_unq, ~gainlossdf_aach[, c(paste0(.x, " gain"), paste0(.x, " loss"), "Allele")] %>%
@@ -307,5 +223,9 @@ plt_fig1h <- ggplot(resdf_melt) +
 ```
 
 # Figure 2
+```{r}
+
+```
+
 # Figure 3
 # Figure 4
