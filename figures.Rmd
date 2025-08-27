@@ -150,7 +150,7 @@ plt_fig1b <- ggplot(freqsdf_quaterly %>% filter(`Nucleotide change` %in% names(f
   geom_errorbar(mapping = aes(ymin = `Mean mutation count` - `Standard deviation of mutation counts`,
                               ymax = `Mean mutation count` + `Standard deviation of mutation counts`)) +
   geom_label_repel(data = labeldf, mapping = aes(x = "24 Q3", y = `Mean mutation count`, label = `Nucleotide change`, color = `Nucleotide change`),
-                   direction = "y", seed = 1234, nudge_x = 4, min.segment.length = 0) +
+                   direction = "y", seed = 1234, nudge_x = 4, min.segment.length = 0, size = 7/.pt) +
   scale_color_manual(values = frequent_ncs) +
   scale_x_discrete(breaks = c(paste0(20:24, " Q1"))) +
   xlab("Isolation date") + ylab("Mean count") +
@@ -203,7 +203,7 @@ lbldf$lbls <- pvalsdf$pval %>% PrettyPvalues()
 lbldf$nc <- factor(lbldf$nc, levels = levels(resdf$nc))
 
 resdf_melt <- reshape2::melt(resdf)
-pvalpos_fig1d = 105
+pvalpos_fig1d = 110
 plt_fig1d <- ggplot(resdf_melt) +
   geom_boxplot(aes(x = variable, y = value)) +
   geom_text(data = lbldf, aes(x = 1.5, y = pvalpos_fig1d, label = lbls), parse = TRUE, size = 7/.pt) +
@@ -212,6 +212,7 @@ plt_fig1d <- ggplot(resdf_melt) +
   scale_colour_brewer(type = "div", palette = "Set1") +
   facet_wrap(~nc, nrow = 1) +
   xlab(NULL) + ylab("Number of mutations") +
+  ylim(0, 120) +
   thm
 
 # Figure 1E ----------
@@ -240,11 +241,11 @@ corr_pval <- PrettyPvalues(corrvals_vctr[2])
 
 plt_fig1f <- aaprefsdf %>% 
   ggplot() + 
-  geom_bar(aes(y = `Amino acid`, x = `Median bit score`), stat = "identity") +
-  annotate("text", x = 0.2, y = 5.3, label = corr_rho, hjust = 0, size = 7/.pt) +
-  annotate("text", x = 0.2, y = "E", label = corr_pval, hjust = 0, size = 7/.pt, parse = "TRUE") +
-  xlab("Median sum bitscores") +
-  ylab("Amino acids") +
+  geom_bar(aes(x = `Amino acid`, y = `Median bit score`), stat = "identity") +
+  annotate("text", y = 0.6, x = "E", label = corr_rho, hjust = 0, size = 7/.pt) +
+  annotate("text", y = 0.5, x = "E", label = corr_pval, hjust = 0, size = 7/.pt, parse = "TRUE") +
+  ylab("Median sum bitscores") +
+  xlab("Amino acid") +
   thm
 
 # Figure 1G ----------
@@ -290,20 +291,20 @@ plt_fig1h <- ggplot(resdf_melt) +
   thm
 
 # assembling Figure 1 ----------
-row1 <- plot_grid(plt_fig1a, plt_fig1b, labels = c("A", "B"))
-row2 <- plot_grid(plt_fig1c, labels = "C")
-row3 <- plot_grid(plt_fig1d, labels = "D")
+row1 <- plot_grid(plt_fig1a, plt_fig1b, labels = c("A", "B"), label_size = 7)
+row2 <- plot_grid(plt_fig1c, labels = "C", label_size = 7)
+row3 <- plot_grid(plt_fig1d, labels = "D", label_size = 7)
 row4 <- plot_grid(plt_fig1e,
                   plt_fig1f + thm + theme(axis.text.y = element_text(size = 7)),
-                  plt_fig1g, labels = c("E", "F", "G"), nrow = 1, rel_widths = c(0.4, 0.25, 0.35))
-row5 <- plot_grid(plt_fig1h, labels = "H")
+                  plt_fig1g, labels = c("E", "F", "G"), nrow = 1, rel_widths = c(0.35, 0.3, 0.35), label_size = 7)
+row5 <- plot_grid(plt_fig1h, labels = "H", label_size = 7)
 plt_fig1 <- plot_grid(row1, row2, row3, row4, row5, ncol = 1)
 
 png(filename = "plts_ready/figure_1.png", width = 18.46, height = 26.14, units = "cm", res = 300)
 plt_fig1
 dev.off()
 
-cairo_pdf(file = "plts_ready_pdf/figure_1.pdf", width = conv_unit(18, "cm", "inch"), height = conv_unit(26.14, "cm", "inch"))
+cairo_pdf(file = "plts_ready_pdf/figure_1.pdf", width = conv_unit(18, "cm", "inch"), height = conv_unit(18.5, "cm", "inch"))
 plt_fig1
 dev.off()
 ```
@@ -401,16 +402,17 @@ plt_fig2e <- ggplot(bgainreddf) +
   xlab("Allele") + ylab("Country") +
   theme_classic() +
   thm +
-  theme(legend.position = "bottom") +
-  theme(legend.key.width = unit(1, 'cm'), legend.key.height = unit(0.3, 'cm'), legend.title = element_blank(),
+  # theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(0.2, 'cm'), legend.title = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   theme(plot.tag = element_text(face = "bold"))
 
 # assembling Figure 2 ----------
-row1 <- plot_grid(plt_fig2a + labs(tag = "A"), plt_fig2b + labs(tag = "B"))
-row2 <- plot_grid(plt_fig2c + labs(tag = "C"))
+row1 <- plot_grid(plt_fig2a + labs(tag = "A"), plt_fig2b + labs(tag = "B"), label_size = 7)
+row2 <- plot_grid(plt_fig2c + labs(tag = "C"), label_size = 7)
 row3 <- plot_grid(plt_fig2d + labs(tag = "D") + guides(fill=guide_legend(nrow=2,byrow=TRUE)),
-                  plt_fig2e + labs(tag = "E"), rel_widths = c(0.5, 0.5))
+                  plt_fig2e + labs(tag = "E"), rel_widths = c(0.5, 0.5),
+                  label_size = 7)
 
 plt_fig2 <- plot_grid(row1, row2, row3, ncol = 1)
 
@@ -470,7 +472,7 @@ plt_fig3b <- ggplot(tcelldf_long) +
   thm
 
 # assembling Figure 3 -----------
-figure_3 <- plot_grid(plt_fig3a, plt_fig3b, ncol = 1, labels = c("A", "B"))
+figure_3 <- plot_grid(plt_fig3a, plt_fig3b, ncol = 1, labels = c("A", "B"), label_size = 7)
 png(filename = "plts_ready/figure_3.png", width = 13, height = 7, units = "cm", res = 300)
 figure_3
 dev.off()
@@ -505,8 +507,8 @@ gainlossdf_bloom <- readxl::read_excel("supplementary_data_tables/Supplementary_
 plt_supplfig1b <- CreateGainlossPlots(gainlossdf_bloom, facet_row_n = 2, pvalpos = 0.06)
 
 # assembling Supplementary Figure 1 -----------
-row1 <- cowplot::plot_grid(plt_supplfig1a, labels = c("A"))
-row2 <- cowplot::plot_grid(plt_supplfig1b, labels = c("B"))
+row1 <- cowplot::plot_grid(plt_supplfig1a, labels = c("A"), label_size = 7)
+row2 <- cowplot::plot_grid(plt_supplfig1b, labels = c("B"), label_size = 7)
 supplfig_1 <- cowplot::plot_grid(row1, row2, ncol = 1)
 
 png(filename = "plts_ready/supplfig_1.png", width = 18, height = 20, units = "cm", res = 300)
@@ -527,7 +529,7 @@ plt_supplfig2b <- CreateGainlossPlots(gainlossdf_rubella, facet_row_n = 1, pvalp
   xlab("") + ylab("Number of mutations")
 
 # assembling Supplementary Figure 2 -----------
-plt_supplfig_2 <- cowplot::plot_grid(plt_supplfig2a, plt_supplfig2b,ncol = 1, labels = c("A", "B"))
+plt_supplfig_2 <- cowplot::plot_grid(plt_supplfig2a, plt_supplfig2b,ncol = 1, labels = c("A", "B"), label_size = 7)
 
 png(filename = "plts_ready/supplfig_2.png", width = 18, height = 20, units = "cm", res = 300)
 plt_supplfig_2
@@ -618,8 +620,8 @@ plt_supplfig5c <- CreateGainlossPlots(gainlossdf_GU, pvalpos = 42,
 png(filename = "plts_ready/supplfig_5.png",
     width = 18, height = 16, units = "cm", res = 300)
 cowplot::plot_grid(cowplot::plot_grid(plt_supplfig5a, plt_supplfig5b, nrow = 1,
-                                      labels = c("A", "B"), rel_widths = c(0.6, 0.4)), 
-                   plt_supplfig5c, ncol = 1, labels = c(NA, "C"))
+                                      labels = c("A", "B"), rel_widths = c(0.6, 0.4), label_size = 7), 
+                   plt_supplfig5c, ncol = 1, labels = c(NA, "C"), label_size = 7)
 dev.off()
 ```
 
@@ -691,9 +693,9 @@ pltslist <- list(ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (all l
   map(~.x + ylab("Fitness change") + theme_classic())
 
 pltslist <- pmap(list(pltslist, corresdf$pretty_str, corresdf$pos),
-                     \(pltobj = ..1, corrlab = ..2, corrpos = ..3) {pltobj + annotate("text", x = corrpos, y = 3, label = corrlab, parse = TRUE)})
+                     \(pltobj = ..1, corrlab = ..2, corrpos = ..3) {pltobj + annotate("text", x = corrpos, y = 3, label = corrlab, parse = TRUE, size = 7/.pt) + thm})
 
-plt_supplfig10 <- pltslist %>% cowplot::plot_grid(plotlist = ., ncol = 2, labels = c("A", "B", "C", "D", "E", "F"))
+plt_supplfig10 <- pltslist %>% cowplot::plot_grid(plotlist = ., ncol = 2, labels = c("A", "B", "C", "D", "E", "F"), label_size = 7)
 
 png(filename = "plts_ready/supplfig_10.png",
     width = 16, height = 20, units = "cm", res = 300)
