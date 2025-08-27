@@ -661,8 +661,27 @@ dev.off()
 
 # Supplementary Figure 10
 ```{r}
+# loading data -----------
 fitnessdf <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_11.xlsx", sheet = "Supplementary Data Table 29")
 
+# checking tendencies between binding gains vs. delta values -----------
+netgain_params <- colnames(fitnessdf)[4:9]
+corresdf <- map_df(netgain_params, \(.x) {
+                       Hmisc::rcorr(fitnessdf[[.x]], fitnessdf[["Fitness change"]], type = "spearman") %>% ExtractCorrResults(string_output = FALSE)
+                     }) %>%
+  mutate(prettyp = PrettyPvalues(P)) %>% 
+  mutate(r_round = round(r, digits = 2))
+
+corresdf$pos <- map_dbl(netgain_params, \(.x) {
+  extreme_vals <- fitnessdf[[.x]] %>% Rfast::min_max()
+  quantile(extreme_vals[1]:extreme_vals[2], probs = 0.5)
+})
+
+corresdf$pretty_str <-  corresdf$prettyp %>%
+  gsub("paste\\(", "", .) %>%
+  paste0('paste(ρ, " = ", ', corresdf$r_round, ', ", ", ' , .)
+
+# creating the plots -----------
 pltslist <- list(ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (all loci)`, y = `Fitness change`)) + xlab("Net binding gain (all loci)"),
                      ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (A)`, y = `Fitness change`)) + xlab("Net binding gain (A)"),
                      ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (B)`, y = `Fitness change`)) + xlab("Net binding gain (B)"),
@@ -670,6 +689,9 @@ pltslist <- list(ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (all l
                      ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (C)`, y = `Fitness change`)) + xlab("Net binding gain (C)"),
                      ggplot(fitnessdf) + geom_point(aes(x = `Net binding gain (A0201)`, y = `Fitness change`)) + xlab("Net binding gain (A0201)")) %>%
   map(~.x + ylab("Fitness change") + theme_classic())
+
+pltslist <- pmap(list(pltslist, corresdf$pretty_str, corresdf$pos),
+                     \(pltobj = ..1, corrlab = ..2, corrpos = ..3) {pltobj + annotate("text", x = corrpos, y = 3, label = corrlab, parse = TRUE)})
 
 plt_supplfig10 <- pltslist %>% cowplot::plot_grid(plotlist = ., ncol = 2, labels = c("A", "B", "C", "D", "E", "F"))
 
