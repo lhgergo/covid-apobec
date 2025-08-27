@@ -102,7 +102,7 @@ CreateGainlossPlots <- function(x, facet_row_n = 1, pvalpos = 100, ncs_unq = NUL
   resdf_melt <- reshape2::melt(resdf)
   plt <- ggplot(resdf_melt) +
     geom_boxplot(aes(x = variable, y = value)) +
-    geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE) +
+    geom_text(data = lbldf, aes(x = 1.5, y = pvalpos, label = lbls), parse = TRUE, size = 7/.pt) +
     geom_line(aes(x = variable, y = value, group = allele, color = greater_gain), size = 0.25, show.legend = FALSE, alpha = 0.5) +
     geom_point(aes(x = variable, y = value, color = greater_gain), show.legend = FALSE, alpha = 0.5) +
     scale_colour_brewer(type = "div", palette = "Set1") +
@@ -418,7 +418,7 @@ png(filename = "plts_ready/figure_2.png", height = 24.14, width = 18.46, res = 3
 plt_fig2
 dev.off()
 
-cairo_pdf(file = "plts_ready_pdf/figure_2.pdf", width = conv_unit(18, "cm", "inch"), height = conv_unit(26.14, "cm", "inch"))
+cairo_pdf(file = "plts_ready_pdf/figure_2.pdf", width = conv_unit(18, "cm", "inch"), height = conv_unit(18.5, "cm", "inch"))
 plt_fig2
 dev.off()
 ```
@@ -458,10 +458,10 @@ plt_fig3b <- ggplot(tcelldf_long) +
   geom_line(aes(x = variable, y = value, group = id), size = 0.25, show.legend = FALSE, alpha = 0.5) +
   geom_point(aes(x = variable, y = value), show.legend = FALSE, alpha = 0.5) +
   scale_colour_brewer(type = "div", palette = "Set1") +
-  annotate("text", x = 1.5, y = tcelldf$`CD25+ fraction - peptide pool 1` %>% max %>% add(0.8),
+  annotate("text", x = 1.5, y = tcelldf$`CD25+ fraction - peptide pool 1` %>% max %>% add(0.9),
            label = PrettyPvalues(pval_fc_unstim_orig),
            hjust = 0.5, parse = TRUE, size = 7/.pt) +
-  annotate("text", x = 2.5, y = tcelldf$`CD25+ fraction - peptide pool 2` %>% max %>% add(0.8),
+  annotate("text", x = 2.5, y = tcelldf$`CD25+ fraction - peptide pool 2` %>% max %>% add(0.9),
            label = PrettyPvalues(pval_fc_orig_mut),
            hjust = 0.5, parse = TRUE, size = 7/.pt) +
   geom_segment(x = 1, xend = 2, y = tcelldf$`CD25+ fraction - peptide pool 1` %>% max %>% add(0.6)) +
@@ -502,14 +502,14 @@ plt_supplfig1a <- ggplot(bloomdf) +
 
 # Supplementary Figure 1B ----------
 gainlossdf_bloom <- readxl::read_excel("supplementary_data_tables/Supplementary_Data_4.xlsx", sheet = "Supplementary Data Table 16")
-plt_supplfig1b <- CreateGainlossPlots(gainlossdf_bloom, facet_row_n = 1, pvalpos = 0.06)
+plt_supplfig1b <- CreateGainlossPlots(gainlossdf_bloom, facet_row_n = 2, pvalpos = 0.06)
 
 # assembling Supplementary Figure 1 -----------
 row1 <- cowplot::plot_grid(plt_supplfig1a, labels = c("A"))
 row2 <- cowplot::plot_grid(plt_supplfig1b, labels = c("B"))
 supplfig_1 <- cowplot::plot_grid(row1, row2, ncol = 1)
 
-png(filename = "plts_ready/supplfig_1.png", width = 18.46, height = 20, units = "cm", res = 300)
+png(filename = "plts_ready/supplfig_1.png", width = 18, height = 20, units = "cm", res = 300)
 supplfig_1
 dev.off()
 ```
@@ -529,7 +529,7 @@ plt_supplfig2b <- CreateGainlossPlots(gainlossdf_rubella, facet_row_n = 1, pvalp
 # assembling Supplementary Figure 2 -----------
 plt_supplfig_2 <- cowplot::plot_grid(plt_supplfig2a, plt_supplfig2b,ncol = 1, labels = c("A", "B"))
 
-png(filename = "plts_ready/supplfig_2.png", width = 18.46, height = 20, units = "cm", res = 300)
+png(filename = "plts_ready/supplfig_2.png", width = 18, height = 20, units = "cm", res = 300)
 plt_supplfig_2
 dev.off()
 ```
@@ -559,7 +559,7 @@ plt_supplfig3 <- CreateGainlossPlots(gainlossdfs_context_all,
                     order_by_medians = F)
 
 # exporting Supplementary Figure 3 -----------
-png(filename = "plts_ready/supplfig_3.png", width = 18.46, height = 20.1, units = "cm", res = 300)
+png(filename = "plts_ready/supplfig_3.png", width = 18, height = 20.1, units = "cm", res = 300)
 plt_supplfig3
 dev.off()
 ```
@@ -576,7 +576,7 @@ plt_supplfig4 <- netgainmtx %>%
                      color = colorRampPalette(c("#3C5488B2", "white", "#DC0000B2"))(100))
 
 # exporting Supplementary Figure 3 -----------
-png(filename = "plts_ready/supplfig_4.png", width = 18.46, height = 20, units = "cm", res = 300)
+png(filename = "plts_ready/supplfig_4.png", width = 18, height = 20, units = "cm", res = 300)
 plt_supplfig4
 dev.off()
 ```
@@ -616,7 +616,7 @@ plt_supplfig5c <- CreateGainlossPlots(gainlossdf_GU, pvalpos = 42,
 
 # exporting Supplementary Figure 5 -----------
 png(filename = "plts_ready/supplfig_5.png",
-    width = 20, height = 16, units = "cm", res = 300)
+    width = 18, height = 16, units = "cm", res = 300)
 cowplot::plot_grid(cowplot::plot_grid(plt_supplfig5a, plt_supplfig5b, nrow = 1,
                                       labels = c("A", "B"), rel_widths = c(0.6, 0.4)), 
                    plt_supplfig5c, ncol = 1, labels = c(NA, "C"))
@@ -639,7 +639,7 @@ plt_supplfig6 <- ggplot(bgainsdf_alleles) +
   thm + theme(axis.text.x = element_text(angle = 90, vjust = 0.5), legend.position = "none")
 
 # exporting Supplementary Figure 6 -----------
-png(filename = "plts_ready/supplfig_6.png", width = 18.46, height = 10, units = "cm", res = 300)
+png(filename = "plts_ready/supplfig_6.png", width = 18, height = 10, units = "cm", res = 300)
 plt_supplfig6
 dev.off()
 ```
