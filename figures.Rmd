@@ -309,6 +309,30 @@ plt_fig1
 dev.off()
 ```
 
+# Table 1
+```{r}
+# Table 1 ----------
+genotypesdf  <- readxl::read_excel("supplementary_data_tables/Source_Data.xlsx", sheet = "Supplementary Data Table 9", skip = 1)
+genotypesdf %<>% 
+  dplyr::select("Subject ID",
+                "Binding gain for all loci",
+                "Binding gain for HLA-A",
+                "Binding gain for HLA-B",
+                "Binding gain for HLA-C") %>% 
+  set_colnames(c("id", "all", "A", "B", "C"))
+
+dir.create("data/major_revision_3_finalplots/tbls")
+
+genotypesdf %>% 
+  reshape2::melt() %>%
+  set_colnames(c("id", "locus", "value")) %>% 
+  group_by(locus) %>%
+  summarise(prop_under_0 = mean(value < 0)*100,
+            prop_0 = mean(value == 0)*100,
+            prop_above_0 = mean(value > 0)*100) %>% set_colnames(c("locus", "% under 0", "% equals 0", "% above 0")) %>% 
+  writexl::write_xlsx(path = "figures/tbl_1_ds2.xlsx")
+```
+
 # Figure 2
 ```{r}
 # Figure 2A ----------
@@ -703,7 +727,21 @@ plt_supplfig10
 dev.off()
 ```
 
+# Figure R1
+The following figure was included in the last response letter, showing the impact of downsampling on 
+
+```{r}
+# Figure R1 (from the response letter to the reviewers) ----------
+gainlossdf_figr1 <- readxl::read_excel("supplementary_data_tables/Source_Data.xlsx", sheet = "Supplementary Data Table 30", skip = 1)
+plt_figr1 <- CreateGainlossPlots(gainlossdf_figr1, facet_row_n = 1, pvalpos = 15)
+
+png(filename = "plts_ready/figure_r_1.png", width = 30, height = 10, units = "cm", res = 300)
+plt_figr1
+dev.off()
+```
+
+
+
 ```{r}
 toc()
 ```
-
