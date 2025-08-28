@@ -330,7 +330,7 @@ genotypesdf %>%
   summarise(prop_under_0 = mean(value < 0)*100,
             prop_0 = mean(value == 0)*100,
             prop_above_0 = mean(value > 0)*100) %>% set_colnames(c("locus", "% under 0", "% equals 0", "% above 0")) %>% 
-  writexl::write_xlsx(path = "figures/tbl_1_ds2.xlsx")
+  writexl::write_xlsx(path = "plts_ready/tbl_1_ds2.xlsx")
 ```
 
 # Figure 2
