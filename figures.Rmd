@@ -859,7 +859,7 @@ dev.off()
 ```
 
 # Figure R1
-The following figure was included in the last response letter, showing the impact of downsampling on 
+The following figure was included in the last response letter, showing the impact of downsampling on binding gains/losses per nucleotide change types.
 
 ```{r}
 # Figure R1 (from the response letter to the reviewers) ----------
