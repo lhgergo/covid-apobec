@@ -1,6 +1,5 @@
 ---
-title: "Generating figures for \"C>U mutations generate immunogenic peptides in SARS-CoV-2\"
-  by Balogh et al."
+title: "Generating figures for the manuscript"
 author: "Gergő Mihály Balogh"
 date: "2025-07-16"
 output: html_document
@@ -13,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Introduction
-The following file contains all the codes necessary to generate the figures in the "C>U mutations generate immunogenic peptides in SARS-CoV-2".
+The following file contains all the codes necessary to generate the figures for the manuscript "C>U mutations generate immunogenic peptides in SARS-CoV-2" by Balogh et al. (2025).
 
 # Loading libraries, functions and common objects
 ```{r}
